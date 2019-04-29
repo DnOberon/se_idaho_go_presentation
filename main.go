@@ -2,7 +2,7 @@ package main
 
 // package names become the accessor prefix for utilizing their contents
 import (
-	"fmt"
+	"encoding/json"
 	"log"
 	"net"
 	"net/http"
@@ -23,21 +23,32 @@ func main() {
 
 	go func(outputters ...Outputter) { // anon func can be declared inline - or you can do something like go yourfunc()
 		for {
-			addressesAndInterfaces(logout, fileout)
+			addressesAndInterfaces(outputters...)
 
 			time.Sleep(5 * time.Second) // time.Second is a constant provided by the time package
 		}
-	}(logout, fileout) // in order to maintain scope, specify and pass in needed variables
+	}(&logout, &fileout) // in order to maintain scope, specify and pass in needed variables
 
-	// very simple static file server, will run until terminated from command line
-	err = http.ListenAndServe(":8090", http.FileServer(http.Dir("")))
+	// go supports closures - here we use it to specify which outputter the handler should use to call
+	// the last seen function
+	http.HandleFunc("/", outputterHandle(&fileout))
+
+	err = http.ListenAndServe(":8090", nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
+func outputterHandle(outputter Outputter) func(http.ResponseWriter, *http.Request) {
+	return func(resp http.ResponseWriter, req *http.Request) {
+		resp.Header().Set("Content-Type", "application/json")
+
+		json.NewEncoder(resp).Encode(outputter.LastSeen())
+	}
+}
+
 func addressesAndInterfaces(outputters ...Outputter) { // variadic function parameters are treated as an array
-	var output []string
+	output := map[string][]string{}
 
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -53,7 +64,7 @@ func addressesAndInterfaces(outputters ...Outputter) { // variadic function para
 		}
 
 		for _, a := range addresses {
-			output = append(output, fmt.Sprintf("%s : %s", inf.Name, a.String())) // slices can be appended to
+			output[inf.Name] = append(output[inf.Name], a.String()) // slices can be appended to
 		}
 
 	}
